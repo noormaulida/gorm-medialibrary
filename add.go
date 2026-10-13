@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,6 +13,10 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// newUUID is overridden in tests to force deterministic / colliding UUIDs.
+var newUUID = uuid.NewString
+
 
 type addOptions struct {
 	disk            string
@@ -116,7 +119,7 @@ func (l *Library) AddMedia(ctx context.Context, model HasMedia, collectionName s
 		return nil, err
 	}
 
-	uid := uuid.NewString()
+	uid := newUUID()
 	now := time.Now()
 	mime := source.mimeType
 	media := &Media{
@@ -181,18 +184,25 @@ func (l *Library) AddMedia(ctx context.Context, model HasMedia, collectionName s
 		return nil, err
 	}
 
+	if err := l.replacePrevious(ctx, previous, media); err != nil {
+		return nil, err
+	}
+	return media, nil
+}
+
+func (l *Library) replacePrevious(ctx context.Context, previous []Media, media *Media) error {
 	for i := range previous {
 		if previous[i].ID == media.ID {
 			continue
 		}
 		if err := l.Delete(ctx, previous[i]); err != nil {
 			if delErr := l.Delete(ctx, *media); delErr != nil {
-				return nil, fmt.Errorf("%w: clear previous: %v; compensate new: %v", ErrReplaceFailed, err, delErr)
+				return fmt.Errorf("%w: clear previous: %v; compensate new: %v", ErrReplaceFailed, err, delErr)
 			}
-			return nil, fmt.Errorf("%w: %v", ErrReplaceFailed, err)
+			return fmt.Errorf("%w: %v", ErrReplaceFailed, err)
 		}
 	}
-	return media, nil
+	return nil
 }
 
 // trackingDisk records successful Put paths for compensating cleanup.
@@ -217,7 +227,7 @@ func cleanupUpload(ctx context.Context, disk Disk, mediaID uint64, paths []strin
 		return
 	}
 	if local, ok := disk.(*LocalDisk); ok {
-		_ = os.RemoveAll(filepath.Join(local.Root(), fmt.Sprintf("%d", mediaID)))
+		_ = removeAll(filepath.Join(local.Root(), fmt.Sprintf("%d", mediaID)))
 	}
 }
 

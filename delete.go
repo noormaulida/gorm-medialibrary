@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"gorm.io/gorm"
@@ -75,7 +74,7 @@ func deleteMediaFiles(ctx context.Context, disk, convDisk Disk, media Media) err
 	}
 	if local, ok := disk.(*LocalDisk); ok {
 		dir := filepath.Join(local.Root(), fmt.Sprintf("%d", media.ID))
-		if err := os.RemoveAll(dir); err != nil {
+		if err := removeAll(dir); err != nil {
 			errs = append(errs, fmt.Errorf("media dir: %w", err))
 		}
 	}

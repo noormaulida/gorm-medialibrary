@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
-	"image/png"
 	"io"
 	"path/filepath"
 	"strings"
@@ -67,9 +66,9 @@ func encodeImage(w io.Writer, img image.Image, fileName string, quality int) err
 	ext := strings.ToLower(filepath.Ext(fileName))
 	switch ext {
 	case ".png":
-		return png.Encode(w, img)
+		return pngEncode(w, img)
 	default:
-		return jpeg.Encode(w, img, &jpeg.Options{Quality: quality})
+		return jpegEncode(w, img, &jpeg.Options{Quality: quality})
 	}
 }
 

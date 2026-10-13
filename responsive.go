@@ -133,7 +133,7 @@ func generateTinyPlaceholderSVG(img image.Image, origW, origH int) (string, erro
 	tiny := imaging.Resize(img, 32, 0, imaging.Lanczos)
 	tiny = imaging.Blur(tiny, 1)
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, tiny, &jpeg.Options{Quality: 50}); err != nil {
+	if err := jpegEncode(&buf, tiny, &jpeg.Options{Quality: 50}); err != nil {
 		return "", err
 	}
 	tinyData := "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
