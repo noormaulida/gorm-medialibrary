@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"gorm.io/datatypes"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestAddMediaErrorPathsAndCleanup(t *testing.T) {
@@ -111,7 +113,9 @@ func TestAddMediaErrorPathsAndCleanup(t *testing.T) {
 	if _, err := lib.AddMedia(ctx, model, "any", src); !errors.Is(err, ErrDiskNotFound) {
 		t.Fatal(err)
 	}
-	_ = nextOrderColumn(db, "cov_models", model.ID, "single")
+	if _, err := nextOrderColumn(db, "cov_models", model.ID, "single"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestQueryAndDeleteCoverage(t *testing.T) {
@@ -298,6 +302,124 @@ func TestRegistrarQualityBounds(t *testing.T) {
 	_ = emptyJSONObject()
 	_ = emptyJSONArray()
 	_ = datatypes.JSON([]byte("{}"))
+}
+
+func TestDeleteSurfacesDiskErrors(t *testing.T) {
+	db, lib, _ := setupLib(t)
+	ctx := context.Background()
+	model := covModel{ID: 20}
+	src, _ := FromReader(bytes.NewReader(jpegBytes(t, 10, 10)), "a.jpg", "image/jpeg")
+	media, err := lib.AddMedia(ctx, model, "c", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fd := newFailDisk("public")
+	fd.deleteErr = errBoom
+	// seed so Exists/Open paths unused; Delete will fail
+	lib.disks["public"] = fd
+	if err := lib.Delete(ctx, *media); err == nil {
+		t.Fatal("expected disk delete error")
+	}
+	var still Media
+	if err := db.First(&still, media.ID).Error; err != nil {
+		t.Fatal("row should remain after disk failure")
+	}
+}
+
+func TestOnDiskAndCollectionDisk(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:ondisk?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	a := NewLocalDisk("a", rootA, "/a")
+	b := NewLocalDisk("b", rootB, "/b")
+	lib := New(db, WithDisk(a), WithDisk(b), WithDefaultDisk("a"))
+	lib.Register("cov_models", func(r *Registrar) {
+		r.Collection("on_b").Disk("b")
+		r.Collection("split").Disk("a").ConversionsDisk("b")
+		r.Conversion("thumb").ForCollection("split").Fit(8, 8)
+	})
+	ctx := context.Background()
+	model := covModel{ID: 21}
+
+	src, _ := FromReader(bytes.NewReader(jpegBytes(t, 20, 20)), "x.jpg", "image/jpeg")
+	m1, err := lib.AddMedia(ctx, model, "on_b", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m1.Disk != "b" {
+		t.Fatalf("disk=%s", m1.Disk)
+	}
+	if _, err := os.Stat(filepath.Join(rootB, OriginalPath(*m1))); err != nil {
+		t.Fatal(err)
+	}
+
+	src, _ = FromReader(bytes.NewReader(jpegBytes(t, 20, 20)), "y.jpg", "image/jpeg")
+	m2, err := lib.AddMedia(ctx, model, "c", src, OnDisk("b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m2.Disk != "b" {
+		t.Fatalf("ondisk=%s", m2.Disk)
+	}
+
+	src, _ = FromReader(bytes.NewReader(jpegBytes(t, 40, 40)), "z.jpg", "image/jpeg")
+	m3, err := lib.AddMedia(ctx, model, "split", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m3.Disk != "a" || m3.ConversionsDisk == nil || *m3.ConversionsDisk != "b" {
+		t.Fatalf("split disks: %s / %v", m3.Disk, m3.ConversionsDisk)
+	}
+	if _, err := os.Stat(filepath.Join(rootA, OriginalPath(*m3))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(rootB, ConversionPath(*m3, "thumb"))); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSingleFileReplaceFailureCompensates(t *testing.T) {
+	db, lib, root := setupLib(t)
+	ctx := context.Background()
+	model := covModel{ID: 22}
+	lib.Register("cov_models", func(r *Registrar) {
+		r.Collection("sf").SingleFile()
+	})
+	src, _ := FromReader(bytes.NewReader(jpegBytes(t, 10, 10)), "a.jpg", "image/jpeg")
+	first, err := lib.AddMedia(ctx, model, "sf", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Make delete of previous fail by pointing its disk at a failing disk after mutate row.
+	fd := newFailDisk("broken")
+	fd.deleteErr = errBoom
+	lib.disks["broken"] = fd
+	if err := db.Model(first).Update("disk", "broken").Error; err != nil {
+		t.Fatal(err)
+	}
+	first.Disk = "broken"
+
+	src, _ = FromReader(bytes.NewReader(jpegBytes(t, 10, 10)), "b.jpg", "image/jpeg")
+	_, err = lib.AddMedia(ctx, model, "sf", src)
+	if !errors.Is(err, ErrReplaceFailed) {
+		t.Fatalf("got %v", err)
+	}
+	items, err := lib.GetMedia(model, "sf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// New media compensated away; old row still present (delete failed).
+	if len(items) != 1 || items[0].ID != first.ID {
+		t.Fatalf("expected only old media, got %#v", items)
+	}
+	_ = root
 }
 
 func TestConversionResponsivePutFail(t *testing.T) {

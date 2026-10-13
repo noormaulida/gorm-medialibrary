@@ -3,6 +3,10 @@
 </p>
 
 <p align="center">
+  <img src=".github/gorm-medialibrary.svg" alt="gorm-medialibrary" width="200" />
+</p>
+
+<p align="center">
   Spatie Laravel Media Library–compatible media attachments for GORM.
 </p>
 
@@ -23,6 +27,7 @@
 - Image conversions (fit / crop) via `disintegration/imaging`
 - Responsive images generation (width variants + tiny SVG placeholder, Spatie JSON shape)
 - Pluggable `Disk` interface — `LocalDisk` and built-in `S3Disk` (AWS SDK v2 / S3-compatible)
+- Per-collection / per-upload disk selection (`Disk`, `OnDisk`)
 - Compensating cleanup on failed uploads; `singleFile` replaces only after success
 - Path layout mirrors Spatie: `{id}/{file}`, `{id}/conversions/`, `{id}/responsive-images/`
 - Go **1.24** or higher
@@ -71,6 +76,8 @@ lib.Register("seo_metas", func(r *medialibrary.Registrar) {
     r.Collection("seo_image").
         SingleFile().
         AcceptsMimeTypes("image/jpeg", "image/png").
+        Disk("public").                 // optional; default library disk
+        // ConversionsDisk("s3").       // optional separate disk
         WithResponsiveImages()
 
     r.Conversion("seo_image_large").
@@ -94,6 +101,8 @@ if err != nil {
 }
 
 media, err := lib.AddMedia(ctx, seoMeta, "seo_image", src)
+// Or override disk for this upload:
+// media, err := lib.AddMedia(ctx, seoMeta, "seo_image", src, medialibrary.OnDisk("s3"))
 if err != nil {
     return err
 }

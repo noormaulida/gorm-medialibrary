@@ -17,4 +17,8 @@ var (
 
 	// ErrNotImage is returned when an image conversion is requested for a non-image.
 	ErrNotImage = errors.New("medialibrary: not an image")
+
+	// ErrReplaceFailed is returned when singleFile cannot remove previous media
+	// after a successful upload (the new media is rolled back when possible).
+	ErrReplaceFailed = errors.New("medialibrary: failed to replace previous media")
 )

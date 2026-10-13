@@ -6,6 +6,8 @@ type CollectionConfig struct {
 	SingleFile       bool
 	AcceptsMimeTypes []string
 	ResponsiveImages bool
+	Disk             string // optional; empty → library default disk
+	ConversionsDisk  string // optional; empty → same as Disk
 }
 
 // ConversionConfig describes an image conversion.
@@ -73,6 +75,18 @@ func (b *CollectionBuilder) AcceptsMimeTypes(mimes ...string) *CollectionBuilder
 // WithResponsiveImages generates width variants for the original file in this collection.
 func (b *CollectionBuilder) WithResponsiveImages() *CollectionBuilder {
 	b.cfg.ResponsiveImages = true
+	return b
+}
+
+// Disk sets the storage disk for originals in this collection.
+func (b *CollectionBuilder) Disk(name string) *CollectionBuilder {
+	b.cfg.Disk = name
+	return b
+}
+
+// ConversionsDisk sets the disk for conversions and responsive images.
+func (b *CollectionBuilder) ConversionsDisk(name string) *CollectionBuilder {
+	b.cfg.ConversionsDisk = name
 	return b
 }
 
