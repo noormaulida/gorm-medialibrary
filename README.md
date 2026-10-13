@@ -1,9 +1,5 @@
 <p align="center">
-  <img src="https://skillicons.dev/icons?i=go" alt="Go" width="80" />
-</p>
-
-<p align="center">
-  <img src=".github/gorm-medialibrary.svg" alt="gorm-medialibrary" width="520" />
+  <img src=".github/gorm-medialibrary-new.png" alt="gorm-medialibrary" width="400" />
 </p>
 
 <p align="center">
