@@ -27,24 +27,23 @@
 
 ## Features
 
-- Spatie-compatible `media` table (morph model, collections, conversions JSON, UUID, order)
-- Attach files from path or `io.Reader`
-- Named collections (`singleFile`, MIME allow-list)
+- Spatie-compatible `media` table (collections, conversions, responsive images, UUID, order)
+- Attach from path or `io.Reader`
+- Named collections (`SingleFile`, MIME allow-list, disk selection)
 - Image conversions (fit / crop) via `disintegration/imaging`
-- Responsive images generation (width variants + tiny SVG placeholder, Spatie JSON shape)
-- Pluggable `Disk` interface — `LocalDisk` and built-in `S3Disk` (AWS SDK v2 / S3-compatible)
-- Per-collection / per-upload disk selection (`Disk`, `OnDisk`)
-- Compensating cleanup on failed uploads; `singleFile` replaces only after success
-- Path layout mirrors Spatie: `{id}/{file}`, `{id}/conversions/`, `{id}/responsive-images/`
-- Go **1.24** or higher
+- Responsive images (width variants + tiny SVG placeholder)
+- Built-in `LocalDisk` and `S3Disk` (AWS SDK v2 / S3-compatible)
+- Safe uploads: compensating disk cleanup; `singleFile` replaces only after success
+- Path layout: `{id}/{file}`, `{id}/conversions/`, `{id}/responsive-images/`
+- Go **1.24+**
 
-## Installation
+## Install
 
 ```bash
 go get github.com/noormaulida/gorm-medialibrary@latest
 ```
 
-## Setup
+## Quick start
 
 ```go
 disk := medialibrary.NewLocalDisk("public", "./storage/app/public", "/storage")
@@ -53,15 +52,10 @@ lib := medialibrary.New(db,
     medialibrary.WithDisk(disk),
     medialibrary.WithDefaultDisk("public"),
 )
-
-if err := medialibrary.Migrate(db); err != nil {
-    return err
-}
+_ = medialibrary.Migrate(db) // skip if Laravel/Spatie already migrated
 ```
 
-`Migrate` is optional when the database already uses Spatie Media Library migrations.
-
-## HasMedia model
+### Model
 
 ```go
 type SeoMeta struct {
@@ -70,20 +64,17 @@ type SeoMeta struct {
 }
 
 func (s SeoMeta) MediaModelID() uint64   { return s.ID }
-func (s SeoMeta) MediaModelType() string { return "seo_metas" }
+func (s SeoMeta) MediaModelType() string { return "seo_metas" } // morph alias shared with Laravel
 ```
 
-Use a stable morph alias when sharing rows with Laravel.
-
-## Register collections and conversions
+### Register
 
 ```go
 lib.Register("seo_metas", func(r *medialibrary.Registrar) {
     r.Collection("seo_image").
         SingleFile().
         AcceptsMimeTypes("image/jpeg", "image/png").
-        Disk("public").                 // optional; default library disk
-        // ConversionsDisk("s3").       // optional separate disk
+        Disk("public").
         WithResponsiveImages()
 
     r.Conversion("seo_image_large").
@@ -98,7 +89,7 @@ lib.Register("seo_metas", func(r *medialibrary.Registrar) {
 })
 ```
 
-## Add and read media
+### Add & read
 
 ```go
 src, err := medialibrary.FromPath("./uploads/hero.jpg")
@@ -107,21 +98,21 @@ if err != nil {
 }
 
 media, err := lib.AddMedia(ctx, seoMeta, "seo_image", src)
-// Or override disk for this upload:
-// media, err := lib.AddMedia(ctx, seoMeta, "seo_image", src, medialibrary.OnDisk("s3"))
 if err != nil {
     return err
 }
 
-url, _ := lib.GetURL(*media)                       // original
-large, _ := lib.GetURL(*media, "seo_image_large")   // conversion
-first, _ := lib.GetFirstMediaURL(seoMeta, "seo_image", "seo_image_small")
-srcset, _ := lib.GetSrcset(*media)                 // responsive srcset
+// Optional per-upload disk override:
+// lib.AddMedia(ctx, seoMeta, "seo_image", src, medialibrary.OnDisk("s3"))
+
+url, _ := lib.GetURL(*media)
+large, _ := lib.GetURL(*media, "seo_image_large")
+srcset, _ := lib.GetSrcset(*media)
 ```
 
-Also available: `GetMedia`, `GetFirstMedia`, `GetResponsiveImageURLs`, `ClearMediaCollection`, `Delete`.
+Also: `GetMedia`, `GetFirstMedia`, `GetFirstMediaURL`, `GetResponsiveImageURLs`, `ClearMediaCollection`, `Delete`.
 
-### From an HTTP upload
+### HTTP upload
 
 ```go
 file, header, _ := c.Request.FormFile("image")
@@ -129,7 +120,7 @@ defer file.Close()
 src, err := medialibrary.FromReader(file, header.Filename, header.Header.Get("Content-Type"))
 ```
 
-## S3 disk (built-in)
+## S3 disk
 
 ```go
 import (
@@ -146,7 +137,7 @@ client := s3.NewFromConfig(cfg)
 disk, err := medialibrary.NewS3Disk(medialibrary.S3DiskConfig{
     Name:    "s3",
     Bucket:  "my-bucket",
-    Prefix:  "media", // optional
+    Prefix:  "media",
     BaseURL: "https://cdn.example.com",
     Client:  client,
 })
@@ -156,22 +147,28 @@ if err != nil {
 lib := medialibrary.New(db, medialibrary.WithDisk(disk), medialibrary.WithDefaultDisk("s3"))
 ```
 
-Works with any S3-compatible API (MinIO, R2, etc.) by configuring the AWS SDK endpoint.
-For GCS or other backends, implement `medialibrary.Disk` yourself.
+Works with MinIO, R2, and other S3-compatible APIs via the AWS SDK endpoint config.
+For GCS or custom storage, implement `medialibrary.Disk`.
 
-## Spatie compatibility notes
+## Disk selection
+
+Priority (highest first): `OnDisk` / `OnConversionsDisk` → collection `Disk` / `ConversionsDisk` → library default.
+
+```go
+r.Collection("images").Disk("s3").ConversionsDisk("s3")
+
+lib.AddMedia(ctx, model, "images", src, medialibrary.OnDisk("s3"))
+```
+
+## Spatie notes
 
 | Concern | Guidance |
 |---------|----------|
-| Table / columns | Same defaults as Spatie v9+ style used by SuitCMS |
-| `model_type` | Prefer morph alias (`seo_metas`) shared with Laravel |
-| File paths | `{id}/{file_name}`, conversions under `{id}/conversions/`, responsive under `{id}/responsive-images/` |
-| Responsive images | `WithResponsiveImages()` on collection/conversion; JSON keyed by `media_library_original` / conversion name |
-
-## Minimum Go version
-
-Go **1.24** or higher (required by the AWS SDK v2 S3 client).
+| Table / columns | Spatie v9+ style (e.g. SuitCMS) |
+| `model_type` | Prefer morph alias shared with Laravel |
+| Paths | `{id}/{file}`, `conversions/`, `responsive-images/` |
+| Responsive JSON | Keys `media_library_original` / conversion name |
 
 ## License
 
-MIT License
+MIT
