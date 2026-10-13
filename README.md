@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src=".github/gorm-medialibrary.svg" alt="gorm-medialibrary" width="200" />
+  <img src=".github/gorm-medialibrary.svg" alt="gorm-medialibrary" width="520" />
 </p>
 
 <p align="center">
@@ -11,6 +11,12 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/noormaulida/gorm-medialibrary/actions/workflows/go.yml">
+    <img src="https://github.com/noormaulida/gorm-medialibrary/actions/workflows/go.yml/badge.svg" alt="Go Tests" />
+  </a>
+  <a href="https://codecov.io/gh/noormaulida/gorm-medialibrary">
+    <img src="https://codecov.io/gh/noormaulida/gorm-medialibrary/graph/badge.svg" alt="codecov" />
+  </a>
   <a href="https://pkg.go.dev/github.com/noormaulida/gorm-medialibrary">
     <img src="https://pkg.go.dev/badge/github.com/noormaulida/gorm-medialibrary.svg" alt="Go Reference" />
   </a>
