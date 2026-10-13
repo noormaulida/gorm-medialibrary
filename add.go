@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +15,10 @@ import (
 )
 
 // AddMedia attaches a file to model under collectionName.
+//
+// On failure after any disk writes, uploaded files are deleted (compensating
+// cleanup). For singleFile collections, existing items are removed only after
+// the new media is stored successfully.
 func (l *Library) AddMedia(ctx context.Context, model HasMedia, collectionName string, source *FileSource) (*Media, error) {
 	if err := l.ensureReady(); err != nil {
 		return nil, err
@@ -31,12 +37,14 @@ func (l *Library) AddMedia(ctx context.Context, model HasMedia, collectionName s
 		return nil, err
 	}
 
+	var previous []Media
 	if cfg := l.collectionConfig(modelType, collectionName); cfg != nil {
 		if len(cfg.AcceptsMimeTypes) > 0 && !mimeAllowed(source.mimeType, cfg.AcceptsMimeTypes) {
 			return nil, fmt.Errorf("%w: %s", ErrMimeNotAllowed, source.mimeType)
 		}
 		if cfg.SingleFile {
-			if err := l.ClearMediaCollection(ctx, model, collectionName); err != nil {
+			previous, err = l.GetMedia(model, collectionName)
+			if err != nil {
 				return nil, err
 			}
 		}
@@ -76,21 +84,22 @@ func (l *Library) AddMedia(ctx context.Context, model HasMedia, collectionName s
 		UpdatedAt:            &now,
 	}
 
+	tracker := &trackingDisk{Disk: disk}
 	err = l.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(media).Error; err != nil {
 			return err
 		}
 		path := OriginalPath(*media)
-		if _, err := disk.Put(ctx, path, bytes.NewReader(payload)); err != nil {
+		if _, err := tracker.Put(ctx, path, bytes.NewReader(payload)); err != nil {
 			return err
 		}
-		generated, err := l.performConversions(ctx, disk, *media, bytes.NewReader(payload))
+		generated, err := l.performConversions(ctx, tracker, *media, bytes.NewReader(payload))
 		if err != nil {
 			return err
 		}
 		media.GeneratedConversions = encodeGeneratedConversions(generated)
 
-		responsive, err := l.performResponsiveImages(ctx, disk, *media, bytes.NewReader(payload))
+		responsive, err := l.performResponsiveImages(ctx, tracker, *media, bytes.NewReader(payload))
 		if err != nil {
 			return err
 		}
@@ -102,9 +111,43 @@ func (l *Library) AddMedia(ctx context.Context, model HasMedia, collectionName s
 		}).Error
 	})
 	if err != nil {
+		cleanupUpload(ctx, disk, media.ID, tracker.paths)
 		return nil, err
 	}
+
+	for i := range previous {
+		if previous[i].ID == media.ID {
+			continue
+		}
+		_ = l.Delete(ctx, previous[i])
+	}
 	return media, nil
+}
+
+// trackingDisk records successful Put paths for compensating cleanup.
+type trackingDisk struct {
+	Disk
+	paths []string
+}
+
+func (t *trackingDisk) Put(ctx context.Context, path string, r io.Reader) (int64, error) {
+	n, err := t.Disk.Put(ctx, path, r)
+	if err == nil {
+		t.paths = append(t.paths, path)
+	}
+	return n, err
+}
+
+func cleanupUpload(ctx context.Context, disk Disk, mediaID uint64, paths []string) {
+	for _, p := range paths {
+		_ = disk.Delete(ctx, p)
+	}
+	if mediaID == 0 {
+		return
+	}
+	if local, ok := disk.(*LocalDisk); ok {
+		_ = os.RemoveAll(filepath.Join(local.Root(), fmt.Sprintf("%d", mediaID)))
+	}
 }
 
 func mimeAllowed(got string, allowed []string) bool {

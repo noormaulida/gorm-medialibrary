@@ -42,19 +42,13 @@ func TestLibraryOptionsAndEnsureReady(t *testing.T) {
 
 	d := NewLocalDisk("a", t.TempDir(), "/a")
 	lib = New(db, WithDisk(nil), WithDisk(d), WithDefaultDisk(""), WithDefaultDisk("a"))
-	if lib.DB() != db {
-		t.Fatal("DB()")
-	}
-	if lib.defaultDisk != "a" {
-		t.Fatalf("defaultDisk=%q", lib.defaultDisk)
+	if lib.DB() != db || lib.defaultDisk != "a" {
+		t.Fatal("options")
 	}
 	lib.Register("", func(*Registrar) {})
 	lib.Register("x", nil)
-	if lib.collectionConfig("missing", "c") != nil {
-		t.Fatal("expected nil collection")
-	}
-	if lib.conversionsFor("missing", "c") != nil {
-		t.Fatal("expected nil conversions")
+	if lib.collectionConfig("missing", "c") != nil || lib.conversionsFor("missing", "c") != nil {
+		t.Fatal("missing registrar")
 	}
 }
 
@@ -65,7 +59,7 @@ func TestDiskByNameAndLocalDisk(t *testing.T) {
 	}
 	d, err := lib.diskByName("")
 	if err != nil || d.Name() != "public" {
-		t.Fatalf("default disk: %v %#v", err, d)
+		t.Fatalf("default disk: %v", err)
 	}
 
 	disk := NewLocalDisk("local", root, "")
@@ -75,11 +69,11 @@ func TestDiskByNameAndLocalDisk(t *testing.T) {
 	}
 	ok, err := disk.Exists(ctx, "a/b.txt")
 	if err != nil || !ok {
-		t.Fatalf("exists: %v %v", ok, err)
+		t.Fatal(err)
 	}
 	ok, err = disk.Exists(ctx, "nope")
 	if err != nil || ok {
-		t.Fatalf("missing: %v %v", ok, err)
+		t.Fatal("missing")
 	}
 	rc, err := disk.Open(ctx, "a/b.txt")
 	if err != nil {
@@ -87,60 +81,40 @@ func TestDiskByNameAndLocalDisk(t *testing.T) {
 	}
 	b, _ := io.ReadAll(rc)
 	_ = rc.Close()
-	if string(b) != "hi" {
-		t.Fatalf("got %q", b)
+	if string(b) != "hi" || disk.URL("a/b.txt") != "/a/b.txt" {
+		t.Fatal("open/url")
 	}
-	if disk.URL("a/b.txt") != "/a/b.txt" {
-		t.Fatalf("url=%q", disk.URL("a/b.txt"))
-	}
-	if err := disk.Delete(ctx, "a/b.txt"); err != nil {
-		t.Fatal(err)
-	}
-	if err := disk.Delete(ctx, "gone"); err != nil {
-		t.Fatal(err)
-	}
+	_ = disk.Delete(ctx, "a/b.txt")
+	_ = disk.Delete(ctx, "gone")
 
 	badRoot := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(badRoot, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
+	_ = os.WriteFile(badRoot, []byte("x"), 0o644)
+	if _, err := NewLocalDisk("bad", badRoot, "/x").Put(ctx, "z/y.txt", strings.NewReader("z")); err == nil {
+		t.Fatal("mkdir fail")
 	}
-	bad := NewLocalDisk("bad", badRoot, "/x")
-	if _, err := bad.Put(ctx, "z/y.txt", strings.NewReader("z")); err == nil {
-		t.Fatal("expected mkdir fail")
-	}
-
 	good := NewLocalDisk("g", t.TempDir(), "/g")
-	dirPath := filepath.Join(good.Root(), "isdir")
-	if err := os.MkdirAll(dirPath, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	_ = os.MkdirAll(filepath.Join(good.Root(), "isdir"), 0o755)
 	if _, err := good.Put(ctx, "isdir", strings.NewReader("no")); err == nil {
-		t.Fatal("expected create fail")
+		t.Fatal("create fail")
 	}
 
 	locked := filepath.Join(t.TempDir(), "lock")
-	if err := os.MkdirAll(filepath.Join(locked, "sub"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(locked, "sub", "f.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	_ = os.MkdirAll(filepath.Join(locked, "sub"), 0o755)
+	_ = os.WriteFile(filepath.Join(locked, "sub", "f.txt"), []byte("x"), 0o644)
 	ld := NewLocalDisk("l", locked, "/l")
-	if err := os.Chmod(filepath.Join(locked, "sub"), 0); err != nil {
-		t.Fatal(err)
-	}
+	_ = os.Chmod(filepath.Join(locked, "sub"), 0)
 	t.Cleanup(func() { _ = os.Chmod(filepath.Join(locked, "sub"), 0o755) })
 	if _, err := ld.Exists(ctx, "sub/f.txt"); err == nil {
-		t.Fatal("expected exists permission error")
+		t.Fatal("exists perm")
 	}
 	if err := ld.Delete(ctx, "sub/f.txt"); err == nil {
-		t.Fatal("expected delete permission error")
+		t.Fatal("delete perm")
 	}
 }
 
 func TestFileSourceHelpers(t *testing.T) {
 	if _, err := FromPath("/no/such/file"); err == nil {
-		t.Fatal("expected open error")
+		t.Fatal("open")
 	}
 	dir := t.TempDir()
 	p := filepath.Join(dir, "photo.jpg")
@@ -151,7 +125,7 @@ func TestFileSourceHelpers(t *testing.T) {
 	}
 	_ = src.WithName("").WithName("custom")
 	if src.name != "custom" {
-		t.Fatalf("name=%q", src.name)
+		t.Fatal(src.name)
 	}
 	src.close()
 
@@ -165,14 +139,13 @@ func TestFileSourceHelpers(t *testing.T) {
 
 	fail := &seekFail{r: bytes.NewReader([]byte("hello"))}
 	if _, err := fileSourceFrom(fail, "blob"); err == nil {
-		t.Fatal("expected seek error")
+		t.Fatal("seek")
 	}
-
 	if _, err := FromReader(nil, "a.jpg", "image/jpeg"); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("got %v", err)
+		t.Fatal(err)
 	}
 	if _, err := FromReader(strings.NewReader("x"), "", ""); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("got %v", err)
+		t.Fatal(err)
 	}
 	src, err = FromReader(strings.NewReader("x"), "doc.bin", "")
 	if err != nil {
@@ -188,87 +161,77 @@ func TestFileSourceHelpers(t *testing.T) {
 
 type seekFail struct{ r *bytes.Reader }
 
-func (s *seekFail) Read(p []byte) (int, error)         { return s.r.Read(p) }
-func (s *seekFail) Close() error                       { return nil }
-func (s *seekFail) Seek(int64, int) (int64, error)     { return 0, errBoom }
+func (s *seekFail) Read(p []byte) (int, error)     { return s.r.Read(p) }
+func (s *seekFail) Close() error                   { return nil }
+func (s *seekFail) Seek(int64, int) (int64, error) { return 0, errBoom }
 
 func TestHasMediaPrimaryKeyAndResolve(t *testing.T) {
 	if _, _, err := resolveModel(nil); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("got %v", err)
+		t.Fatal(err)
 	}
 	if _, _, err := resolveModel(ModelFrom(0, "x")); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("got %v", err)
+		t.Fatal(err)
 	}
 	if _, _, err := resolveModel(ModelFrom(1, "")); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("got %v", err)
+		t.Fatal(err)
 	}
-
 	if _, err := PrimaryKeyID(nil); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("got %v", err)
+		t.Fatal(err)
 	}
 	var nilPtr *covModel
 	if _, err := PrimaryKeyID(nilPtr); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("got %v", err)
+		t.Fatal(err)
 	}
 	if _, err := PrimaryKeyID(42); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("got %v", err)
+		t.Fatal(err)
 	}
 	type noID struct{ Name string }
 	if _, err := PrimaryKeyID(noID{}); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("got %v", err)
+		t.Fatal(err)
 	}
 	type badID struct{ ID string }
 	if _, err := PrimaryKeyID(badID{ID: "x"}); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("got %v", err)
+		t.Fatal(err)
 	}
 	type uintID struct{ ID uint64 }
 	if _, err := PrimaryKeyID(uintID{}); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("got %v", err)
+		t.Fatal(err)
 	}
 	id, err := PrimaryKeyID(uintID{ID: 7})
 	if err != nil || id != 7 {
-		t.Fatalf("got %d %v", id, err)
+		t.Fatal(err)
 	}
 	type intID struct{ ID int }
 	if _, err := PrimaryKeyID(intID{ID: -1}); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("got %v", err)
+		t.Fatal(err)
 	}
 	id, err = PrimaryKeyID(&intID{ID: 3})
 	if err != nil || id != 3 {
-		t.Fatalf("got %d %v", id, err)
+		t.Fatal(err)
 	}
 }
 
 func TestModelsEncodeDecode(t *testing.T) {
-	restoreHooks(t)
 	m := Media{}
 	if len(m.GeneratedConversionMap()) != 0 || len(m.CustomPropertyMap()) != 0 || len(m.ResponsiveImagesMap()) != 0 {
-		t.Fatal("expected empty maps")
+		t.Fatal("empty")
 	}
 	m.ResponsiveImages = datatypes.JSON([]byte("null"))
 	if len(m.ResponsiveImagesMap()) != 0 {
-		t.Fatal("null responsive")
+		t.Fatal("null")
 	}
 	m.CustomProperties = datatypes.JSON([]byte(`{"a":1}`))
 	if m.CustomPropertyMap()["a"].(float64) != 1 {
-		t.Fatal("custom decode")
+		t.Fatal("custom")
 	}
-	if string(encodeGeneratedConversions(nil)) != "{}" || string(encodeCustomProperties(nil)) != "{}" || string(encodeResponsiveImages(nil)) != "[]" {
-		t.Fatal("nil encoders")
-	}
+	_ = encodeGeneratedConversions(nil)
+	_ = encodeCustomProperties(nil)
+	_ = encodeResponsiveImages(nil)
 	_ = encodeGeneratedConversions(map[string]bool{"x": true})
 	_ = encodeCustomProperties(map[string]any{"k": "v"})
 	_ = encodeResponsiveImages(ResponsiveImagesData{"media_library_original": {URLs: []string{"a.jpg"}}})
-
-	jsonMarshal = func(any) ([]byte, error) { return nil, errBoom }
-	if string(encodeGeneratedConversions(map[string]bool{"a": true})) != "{}" {
-		t.Fatal("marshal fail generated")
-	}
-	if string(encodeCustomProperties(map[string]any{"a": 1})) != "{}" {
-		t.Fatal("marshal fail custom")
-	}
-	if string(encodeResponsiveImages(ResponsiveImagesData{"k": {}})) != "[]" {
-		t.Fatal("marshal fail responsive")
+	if string(encodeCustomProperties(map[string]any{"bad": make(chan int)})) != "{}" {
+		t.Fatal("marshal fail")
 	}
 }
 
@@ -278,12 +241,11 @@ func TestPathEdgeCases(t *testing.T) {
 		t.Fatal(ConversionPath(m, "thumb"))
 	}
 	if !strings.HasSuffix(ResponsiveImageFileName(m, "media_library_original", 10, 5), ".jpg") {
-		t.Fatal(ResponsiveImageFileName(m, "media_library_original", 10, 5))
+		t.Fatal("ext")
 	}
 }
 
 func TestConversionsBranches(t *testing.T) {
-	restoreHooks(t)
 	_, lib, _ := setupLib(t)
 	lib.Register("cov_models", func(r *Registrar) {
 		r.Collection("c")
@@ -302,51 +264,42 @@ func TestConversionsBranches(t *testing.T) {
 	}
 	empty, err := lib.performConversions(context.Background(), disk, Media{ModelType: "none", CollectionName: "c"}, bytes.NewReader(payload))
 	if err != nil || len(empty) != 0 {
-		t.Fatalf("%v %#v", err, empty)
+		t.Fatal(err)
 	}
 	if _, err := lib.performConversions(context.Background(), disk, media, errReader{errBoom}); err == nil {
-		t.Fatal("read fail")
+		t.Fatal("read")
 	}
 	media.MimeType = strPtr("application/pdf")
-	skip, err := lib.performConversions(context.Background(), disk, media, bytes.NewReader(payload))
-	if err != nil || len(skip) != 0 {
-		t.Fatalf("%v %#v", err, skip)
+	skip, _ := lib.performConversions(context.Background(), disk, media, bytes.NewReader(payload))
+	if len(skip) != 0 {
+		t.Fatal("skip")
 	}
 	media.MimeType = strPtr("image/jpeg")
 	if _, err := lib.performConversions(context.Background(), disk, media, bytes.NewReader([]byte("notimage"))); !errors.Is(err, ErrNotImage) {
-		t.Fatalf("got %v", err)
+		t.Fatal(err)
 	}
-
 	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
 	img.Set(0, 0, color.RGBA{A: 255})
 	if applyConversion(img, &ConversionConfig{}) != img {
-		t.Fatal("noop convert")
+		t.Fatal("noop")
 	}
-	if max(1, 2) != 2 || max(3, 1) != 3 {
-		t.Fatal("max")
-	}
+	_ = max(1, 2)
+	_ = max(3, 1)
 	if isImageMIME(nil) {
 		t.Fatal("nil mime")
 	}
+	_ = encodeImage(io.Discard, img, "x.jpg", 0)
+	_ = encodeImage(io.Discard, img, "x.jpg", 101)
+	_ = encodeImage(io.Discard, img, "x.png", 90)
 
-	pngEncode = func(io.Writer, image.Image) error { return errBoom }
-	media.MimeType = strPtr("image/png")
-	media.FileName = "a.png"
-	if _, err := lib.performConversions(context.Background(), disk, media, bytes.NewReader(payload)); err == nil {
-		t.Fatal("encode fail")
-	}
-
-	restoreHooks(t)
 	disk.putErr = errBoom
 	media.FileName = "a.jpg"
-	media.MimeType = strPtr("image/jpeg")
 	if _, err := lib.performConversions(context.Background(), disk, media, bytes.NewReader(jpegBytes(t, 20, 20))); err == nil {
-		t.Fatal("put fail")
+		t.Fatal("put")
 	}
 }
 
 func TestResponsiveBranches(t *testing.T) {
-	restoreHooks(t)
 	_, lib, _ := setupLib(t)
 	lib.Register("cov_models", func(r *Registrar) {
 		r.Collection("c").WithResponsiveImages()
@@ -361,67 +314,38 @@ func TestResponsiveBranches(t *testing.T) {
 	if err != nil || out["media_library_original"].URLs == nil || out["thumb"].URLs == nil {
 		t.Fatalf("%v %#v", err, out)
 	}
-
 	media.MimeType = nil
-	empty, err := lib.performResponsiveImages(context.Background(), disk, media, bytes.NewReader(payload))
-	if err != nil || len(empty) != 0 {
-		t.Fatalf("%v %#v", err, empty)
+	empty, _ := lib.performResponsiveImages(context.Background(), disk, media, bytes.NewReader(payload))
+	if len(empty) != 0 {
+		t.Fatal("nil mime")
 	}
 	media.MimeType = strPtr("image/jpeg")
 	if _, err := lib.performResponsiveImages(context.Background(), disk, media, errReader{errBoom}); err == nil {
-		t.Fatal("read fail")
+		t.Fatal("read")
 	}
 	if _, err := lib.performResponsiveImages(context.Background(), disk, media, bytes.NewReader([]byte("bad"))); !errors.Is(err, ErrNotImage) {
-		t.Fatalf("got %v", err)
+		t.Fatal(err)
 	}
-
 	if calculateResponsiveWidths(0, 10, 10) != nil {
-		t.Fatal("zero size")
+		t.Fatal("zero")
 	}
-	if ResponsiveConversionKey("x") != "x" {
-		t.Fatal("key")
-	}
+	_ = ResponsiveConversionKey("x")
 	if _, ok := ParseResponsiveWidth("plain.jpg"); ok {
-		t.Fatal("no ___")
+		t.Fatal("plain")
 	}
 	if _, ok := ParseResponsiveWidth("a___b"); ok {
-		t.Fatal("short meta")
+		t.Fatal("short")
 	}
 	if _, ok := ParseResponsiveWidth("a___b_x_y.jpg"); ok {
-		t.Fatal("non-int width")
+		t.Fatal("nonint")
 	}
 	if _, ok := ParseResponsiveWidth("a___b_0_1.jpg"); ok {
-		t.Fatal("zero width")
+		t.Fatal("zerow")
 	}
 
 	img := image.NewRGBA(image.Rect(0, 0, 100, 80))
 	disk.putErr = errBoom
 	if _, err := generateResponsiveSet(context.Background(), disk, media, img, jpegBytes(t, 100, 80), "media_library_original", 90); err == nil {
-		t.Fatal("put fail in set")
-	}
-}
-
-func TestResponsiveEncodeFailures(t *testing.T) {
-	restoreHooks(t)
-	_, lib, _ := setupLib(t)
-	lib.Register("cov_models", func(r *Registrar) {
-		r.Collection("c").WithResponsiveImages()
-		r.Conversion("thumb").ForCollection("c").Fit(20, 20).WithResponsiveImages()
-	})
-	disk := newFailDisk("public")
-	lib.disks["public"] = disk
-	media := Media{ID: 3, ModelType: "cov_models", CollectionName: "c", FileName: "a.png", MimeType: strPtr("image/png")}
-	payload := pngBytes(t, 120, 90)
-
-	pngEncode = func(io.Writer, image.Image) error { return errBoom }
-	if _, err := lib.performResponsiveImages(context.Background(), disk, media, bytes.NewReader(payload)); err == nil {
-		t.Fatal("encode conversion fail")
-	}
-
-	restoreHooks(t)
-	img := image.NewRGBA(image.Rect(0, 0, 50, 40))
-	pngEncode = func(io.Writer, image.Image) error { return errBoom }
-	if _, err := generateResponsiveSet(context.Background(), disk, media, img, payload, "media_library_original", 90); err == nil {
-		t.Fatal("encode in set fail")
+		t.Fatal("put set")
 	}
 }

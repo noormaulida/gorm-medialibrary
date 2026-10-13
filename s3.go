@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -51,7 +53,7 @@ type S3Disk struct {
 //
 //	cfg, _ := config.LoadDefaultConfig(ctx)
 //	client := s3.NewFromConfig(cfg)
-//	disk := medialibrary.NewS3Disk(medialibrary.S3DiskConfig{
+//	disk, err := medialibrary.NewS3Disk(medialibrary.S3DiskConfig{
 //	    Name: "s3", Bucket: "my-bucket", BaseURL: "https://cdn.example.com", Client: client,
 //	})
 func NewS3Disk(cfg S3DiskConfig) (*S3Disk, error) {
@@ -94,11 +96,15 @@ func filepathToSlash(p string) string {
 // Put implements Disk.
 func (d *S3Disk) Put(ctx context.Context, rel string, r io.Reader) (int64, error) {
 	counting := &countReader{r: r}
-	_, err := d.client.PutObject(ctx, &s3.PutObjectInput{
+	input := &s3.PutObjectInput{
 		Bucket: aws.String(d.bucket),
 		Key:    aws.String(d.key(rel)),
 		Body:   counting,
-	})
+	}
+	if ct := mime.TypeByExtension(filepath.Ext(rel)); ct != "" {
+		input.ContentType = aws.String(ct)
+	}
+	_, err := d.client.PutObject(ctx, input)
 	if err != nil {
 		return counting.n, err
 	}

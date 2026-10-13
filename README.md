@@ -23,6 +23,7 @@
 - Image conversions (fit / crop) via `disintegration/imaging`
 - Responsive images generation (width variants + tiny SVG placeholder, Spatie JSON shape)
 - Pluggable `Disk` interface — `LocalDisk` and built-in `S3Disk` (AWS SDK v2 / S3-compatible)
+- Compensating cleanup on failed uploads; `singleFile` replaces only after success
 - Path layout mirrors Spatie: `{id}/{file}`, `{id}/conversions/`, `{id}/responsive-images/`
 - Go **1.24** or higher
 

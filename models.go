@@ -54,7 +54,7 @@ func encodeGeneratedConversions(m map[string]bool) datatypes.JSON {
 	if m == nil {
 		return emptyJSONObject()
 	}
-	b, err := jsonMarshal(m)
+	b, err := json.Marshal(m)
 	if err != nil {
 		return emptyJSONObject()
 	}
@@ -75,7 +75,7 @@ func encodeCustomProperties(m map[string]any) datatypes.JSON {
 	if m == nil {
 		return emptyJSONObject()
 	}
-	b, err := jsonMarshal(m)
+	b, err := json.Marshal(m)
 	if err != nil {
 		return emptyJSONObject()
 	}
@@ -96,7 +96,7 @@ func encodeResponsiveImages(m ResponsiveImagesData) datatypes.JSON {
 	if len(m) == 0 {
 		return emptyJSONArray()
 	}
-	b, err := jsonMarshal(m)
+	b, err := json.Marshal(m)
 	if err != nil {
 		return emptyJSONArray()
 	}

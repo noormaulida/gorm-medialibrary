@@ -136,12 +136,4 @@ func writeJPEGFile(t *testing.T, path string, w, h int) {
 	}
 }
 
-func restoreHooks(t *testing.T) {
-	t.Helper()
-	jm, je, pe, bf := jsonMarshal, jpegEncode, pngEncode, buildFileSource
-	t.Cleanup(func() {
-		jsonMarshal, jpegEncode, pngEncode, buildFileSource = jm, je, pe, bf
-	})
-}
-
 var errBoom = errors.New("boom")

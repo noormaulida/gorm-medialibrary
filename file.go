@@ -24,7 +24,7 @@ func FromPath(path string) (*FileSource, error) {
 	if err != nil {
 		return nil, err
 	}
-	src, err := buildFileSource(f, filepath.Base(path))
+	src, err := fileSourceFrom(f, filepath.Base(path))
 	if err != nil {
 		_ = f.Close()
 		return nil, err
