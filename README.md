@@ -33,7 +33,7 @@
 - Image conversions (fit / crop) via `disintegration/imaging`
 - Responsive images (width variants + tiny SVG placeholder)
 - Built-in `LocalDisk` and `S3Disk` (AWS SDK v2 / S3-compatible)
-- Safe uploads: compensating disk cleanup; `singleFile` replaces only after success
+- Safe uploads: disk I/O outside DB transactions; compensating cleanup; `singleFile` replaces only after success
 - Path layout: `{id}/{file}`, `{id}/conversions/`, `{id}/responsive-images/`
 - Go **1.24+**
 

@@ -63,7 +63,7 @@ func TestAddMediaMissingConvDiskAndSingleFileGetFail(t *testing.T) {
 	_ = sqlDB.Close()
 	src, _ = FromReader(bytes.NewReader(jpegBytes(t, 8, 8)), "a.jpg", "image/jpeg")
 	if _, err := lib.AddMedia(context.Background(), covModel{ID: 2}, "sf", src); err == nil {
-		t.Fatal("expected getmedia fail")
+		t.Fatal("expected tx fail on closed db")
 	}
 }
 
@@ -343,4 +343,99 @@ func TestReplacePreviousSameIDSkipped(t *testing.T) {
 	}
 	cleanupUpload(context.Background(), newFailDisk("x"), 0, []string{"a"})
 	_ = os.ErrNotExist
+}
+
+func TestReplacePreviousDeletesAndFails(t *testing.T) {
+	_, lib, _ := setupLib(t)
+	ctx := context.Background()
+	model := covModel{ID: 40}
+	lib.Register("cov_models", func(r *Registrar) { r.Collection("c") })
+	src, _ := FromReader(bytes.NewReader(jpegBytes(t, 8, 8)), "a.jpg", "image/jpeg")
+	old, err := lib.AddMedia(ctx, model, "c", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _ = FromReader(bytes.NewReader(jpegBytes(t, 8, 8)), "b.jpg", "image/jpeg")
+	keep, err := lib.AddMedia(ctx, model, "c", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lib.replacePrevious(ctx, []Media{*old}, keep); err != nil {
+		t.Fatal(err)
+	}
+	items, _ := lib.GetMedia(model, "c")
+	if len(items) != 1 || items[0].ID != keep.ID {
+		t.Fatalf("%#v", items)
+	}
+
+	src, _ = FromReader(bytes.NewReader(jpegBytes(t, 8, 8)), "c.jpg", "image/jpeg")
+	victim, err := lib.AddMedia(ctx, model, "c", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fd := newFailDisk("broken")
+	fd.deleteErr = errBoom
+	lib.disks["broken"] = fd
+	bad := *keep
+	bad.Disk = "broken"
+	_ = lib.db.Model(keep).Update("disk", "broken").Error
+	keep.Disk = "broken"
+	err = lib.replacePrevious(ctx, []Media{bad}, victim)
+	if !errors.Is(err, ErrReplaceFailed) {
+		t.Fatalf("got %v", err)
+	}
+
+	// Both previous delete and compensate fail.
+	lib.disks["public"] = fd
+	other := Media{ID: victim.ID + 99, Disk: "broken", FileName: "z.jpg"}
+	keep2 := &Media{ID: victim.ID + 100, Disk: "public", FileName: "y.jpg"}
+	err = lib.replacePrevious(ctx, []Media{other}, keep2)
+	if !errors.Is(err, ErrReplaceFailed) || !strings.Contains(err.Error(), "compensate") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestAddMediaUpdatesFailCleanup(t *testing.T) {
+	_, lib, _ := setupLib(t)
+	lib.Register("cov_models", func(r *Registrar) { r.Collection("c") })
+	_ = lib.db.Callback().Update().Before("gorm:update").Register("test_fail_update", func(db *gorm.DB) {
+		_ = db.AddError(errBoom)
+	})
+	t.Cleanup(func() {
+		_ = lib.db.Callback().Update().Remove("test_fail_update")
+	})
+	src, _ := FromReader(bytes.NewReader(jpegBytes(t, 8, 8)), "a.jpg", "image/jpeg")
+	if _, err := lib.AddMedia(context.Background(), covModel{ID: 41}, "c", src); err == nil {
+		t.Fatal("expected updates fail")
+	}
+	items, _ := lib.GetMedia(covModel{ID: 41}, "c")
+	if len(items) != 0 {
+		t.Fatalf("row should be cleaned up, got %#v", items)
+	}
+}
+
+func TestEnforceSingleFileGetMediaFail(t *testing.T) {
+	_, lib, _ := setupLib(t)
+	sqlDB, _ := lib.db.DB()
+	_ = sqlDB.Close()
+	if err := lib.enforceSingleFile(context.Background(), covModel{ID: 1}, "c", &Media{ID: 1}); err == nil {
+		t.Fatal("expected getmedia fail")
+	}
+}
+
+func TestResponsiveDiskNameFallback(t *testing.T) {
+	_, lib, _ := setupLib(t)
+	m := Media{
+		Disk: "public",
+		ResponsiveImages: encodeResponsiveImages(ResponsiveImagesData{
+			responsiveOriginalKey: {URLs: []string{"x.jpg"}},
+		}),
+	}
+	urls, err := lib.GetResponsiveImageURLs(m)
+	if err != nil || len(urls) != 1 || !strings.Contains(urls[0], "/storage/") {
+		t.Fatalf("urls=%v err=%v", urls, err)
+	}
+	if got := responsiveDiskName(Media{Disk: "public"}); got != "public" {
+		t.Fatal(got)
+	}
 }

@@ -89,6 +89,9 @@ func (l *Library) GetFirstMediaURL(model HasMedia, collectionName string, conver
 
 // GetResponsiveImageURLs returns public URLs for responsive variants of the original
 // or a named conversion (Spatie getResponsiveImageUrls).
+//
+// All responsive files (including media_library_original) are stored on the
+// conversions disk when set, matching AddMedia write paths.
 func (l *Library) GetResponsiveImageURLs(media Media, conversionName ...string) ([]string, error) {
 	key := ResponsiveConversionKey("")
 	if len(conversionName) > 0 {
@@ -98,11 +101,7 @@ func (l *Library) GetResponsiveImageURLs(media Media, conversionName ...string) 
 	if !ok || len(set.URLs) == 0 {
 		return nil, nil
 	}
-	diskName := media.Disk
-	if key != responsiveOriginalKey && media.ConversionsDisk != nil && *media.ConversionsDisk != "" {
-		diskName = *media.ConversionsDisk
-	}
-	disk, err := l.diskByName(diskName)
+	disk, err := l.diskByName(responsiveDiskName(media))
 	if err != nil {
 		return nil, err
 	}
@@ -123,11 +122,7 @@ func (l *Library) GetSrcset(media Media, conversionName ...string) (string, erro
 	if !ok || len(set.URLs) == 0 {
 		return "", nil
 	}
-	diskName := media.Disk
-	if key != responsiveOriginalKey && media.ConversionsDisk != nil && *media.ConversionsDisk != "" {
-		diskName = *media.ConversionsDisk
-	}
-	disk, err := l.diskByName(diskName)
+	disk, err := l.diskByName(responsiveDiskName(media))
 	if err != nil {
 		return "", err
 	}
@@ -144,4 +139,12 @@ func (l *Library) GetSrcset(media Media, conversionName ...string) (string, erro
 		parts = append(parts, set.Base64SVG+" 32w")
 	}
 	return strings.Join(parts, ", "), nil
+}
+
+// responsiveDiskName returns the disk that holds responsive image files.
+func responsiveDiskName(media Media) string {
+	if media.ConversionsDisk != nil && *media.ConversionsDisk != "" {
+		return *media.ConversionsDisk
+	}
+	return media.Disk
 }

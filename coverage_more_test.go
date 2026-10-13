@@ -384,6 +384,106 @@ func TestOnDiskAndCollectionDisk(t *testing.T) {
 	}
 }
 
+func TestResponsiveOriginalUsesConversionsDisk(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:respdisk?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	a := NewLocalDisk("a", rootA, "/a")
+	b := NewLocalDisk("b", rootB, "/b")
+	lib := New(db, WithDisk(a), WithDisk(b), WithDefaultDisk("a"))
+	lib.Register("cov_models", func(r *Registrar) {
+		r.Collection("split").Disk("a").ConversionsDisk("b").WithResponsiveImages()
+	})
+	ctx := context.Background()
+	src, _ := FromReader(bytes.NewReader(jpegBytes(t, 120, 90)), "hero.jpg", "image/jpeg")
+	media, err := lib.AddMedia(ctx, covModel{ID: 30}, "split", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	urls, err := lib.GetResponsiveImageURLs(*media)
+	if err != nil || len(urls) == 0 {
+		t.Fatalf("urls=%v err=%v", urls, err)
+	}
+	for _, u := range urls {
+		if !strings.HasPrefix(u, "/b/") {
+			t.Fatalf("responsive original should use conversions disk URL, got %s", u)
+		}
+	}
+	srcset, err := lib.GetSrcset(*media)
+	if err != nil || !strings.Contains(srcset, "/b/") {
+		t.Fatalf("srcset=%q err=%v", srcset, err)
+	}
+	// Files live on conversions disk root, not original disk.
+	for _, name := range media.ResponsiveImagesMap()[responsiveOriginalKey].URLs {
+		if _, err := os.Stat(filepath.Join(rootB, ResponsiveImagePath(*media, name))); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestEnforceSingleFileConcurrentNewer(t *testing.T) {
+	_, lib, _ := setupLib(t)
+	ctx := context.Background()
+	model := covModel{ID: 31}
+	lib.Register("cov_models", func(r *Registrar) {
+		r.Collection("sf").SingleFile()
+	})
+	src, _ := FromReader(bytes.NewReader(jpegBytes(t, 10, 10)), "a.jpg", "image/jpeg")
+	older, err := lib.AddMedia(ctx, model, "sf", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _ = FromReader(bytes.NewReader(jpegBytes(t, 10, 10)), "b.jpg", "image/jpeg")
+	newer, err := lib.AddMedia(ctx, model, "sf", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate losing a race: enforce with the older media as "keep".
+	err = lib.enforceSingleFile(ctx, model, "sf", older)
+	if !errors.Is(err, ErrReplaceFailed) {
+		t.Fatalf("got %v", err)
+	}
+	items, err := lib.GetMedia(model, "sf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != newer.ID {
+		t.Fatalf("expected only newer, got %#v", items)
+	}
+}
+
+func TestEnforceSingleFileConcurrentNewerCompensateFail(t *testing.T) {
+	_, lib, root := setupLib(t)
+	ctx := context.Background()
+	model := covModel{ID: 32}
+	lib.Register("cov_models", func(r *Registrar) {
+		r.Collection("sf").SingleFile()
+	})
+	src, _ := FromReader(bytes.NewReader(jpegBytes(t, 10, 10)), "a.jpg", "image/jpeg")
+	older, err := lib.AddMedia(ctx, model, "sf", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _ = FromReader(bytes.NewReader(jpegBytes(t, 10, 10)), "b.jpg", "image/jpeg")
+	if _, err := lib.AddMedia(ctx, model, "sf", src); err != nil {
+		t.Fatal(err)
+	}
+	fd := newFailDisk("public")
+	fd.deleteErr = errBoom
+	lib.disks["public"] = fd
+	err = lib.enforceSingleFile(ctx, model, "sf", older)
+	if !errors.Is(err, ErrReplaceFailed) || !strings.Contains(err.Error(), "compensate") {
+		t.Fatalf("got %v", err)
+	}
+	_ = root
+}
+
 func TestSingleFileReplaceFailureCompensates(t *testing.T) {
 	db, lib, root := setupLib(t)
 	ctx := context.Background()
