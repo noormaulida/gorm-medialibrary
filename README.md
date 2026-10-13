@@ -164,7 +164,7 @@ lib.AddMedia(ctx, model, "images", src, medialibrary.OnDisk("s3"))
 
 | Concern | Guidance |
 |---------|----------|
-| Table / columns | Spatie v9+ style (e.g. SuitCMS) |
+| Table / columns | Spatie v9+ style |
 | `model_type` | Prefer morph alias shared with Laravel |
 | Paths | `{id}/{file}`, `conversions/`, `responsive-images/` |
 | Responsive JSON | Keys `media_library_original` / conversion name |
